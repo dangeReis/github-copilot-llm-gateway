@@ -59,11 +59,15 @@ interface ParsedChunk {
 /**
  * HTTP client for OpenAI-compatible inference servers
  */
+export type GatewayLogger = (message: string) => void;
+
 export class GatewayClient {
   private config: GatewayConfig;
+  private readonly log: GatewayLogger;
 
-  constructor(config: GatewayConfig) {
+  constructor(config: GatewayConfig, logger?: GatewayLogger) {
     this.config = config;
+    this.log = logger ?? (() => { /* no-op logger */ });
   }
 
   /**
@@ -257,7 +261,7 @@ export class GatewayClient {
         id: parsed.id,
       };
     } catch {
-      console.error('Failed to parse SSE chunk:', data);
+      this.log(`Failed to parse SSE chunk: ${data}`);
       return null;
     }
   }

@@ -10,6 +10,7 @@ tsconfig.json
 node_modules/**
 *.vsix
 .devcontainer/**
+.github/**
 PROJECT_SUMMARY.md
 INSTALLATION_TESTING.md
 package-lock.json
