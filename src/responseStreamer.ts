@@ -81,6 +81,47 @@ function reportParserPiece(
 }
 
 /**
+ * Process a single stream chunk, updating stats and dispatching events
+ * through the reporter.
+ * @returns updated inReasoningField flag.
+ */
+function processStreamChunk(
+  chunk: StreamChunk,
+  parser: ThinkingParser,
+  reporter: StreamReporter,
+  stats: StreamStats,
+  inReasoningField: boolean,
+  resolveToolCallArgs: StreamResponseParams['resolveToolCallArgs']
+): boolean {
+  if (chunk.reasoning_content) {
+    stats.hadThinking = true;
+    inReasoningField = true;
+    reporter.reportThinking(chunk.reasoning_content);
+  }
+
+  if (chunk.content) {
+    if (inReasoningField) {
+      inReasoningField = false;
+      reporter.reportThinkingDone();
+    }
+    stats.totalContent += chunk.content;
+    for (const piece of parser.process(chunk.content)) {
+      reportParserPiece(piece, reporter, stats, false);
+    }
+  }
+
+  if (chunk.finished_tool_calls?.length) {
+    for (const toolCall of chunk.finished_tool_calls) {
+      stats.totalToolCalls++;
+      const args = resolveToolCallArgs(toolCall);
+      reporter.reportToolCall(toolCall.id, toolCall.name, args);
+    }
+  }
+
+  return inReasoningField;
+}
+
+/**
  * Consume an async stream of chat completion chunks, dispatching pieces to
  * the reporter as they arrive. Returns aggregate stats that the caller can
  * use to decide whether the response was empty and needs an error fallback.
@@ -103,33 +144,9 @@ export async function streamResponse(params: StreamResponseParams): Promise<Stre
     if (isCancelled()) {
       break;
     }
-
-    // Structured reasoning field (LM Studio / DeepSeek-R1).
-    if (chunk.reasoning_content) {
-      stats.hadThinking = true;
-      inReasoningField = true;
-      reporter.reportThinking(chunk.reasoning_content);
-    }
-
-    // Text content — may contain raw <thinking> tags that the parser extracts.
-    if (chunk.content) {
-      if (inReasoningField) {
-        inReasoningField = false;
-        reporter.reportThinkingDone();
-      }
-      stats.totalContent += chunk.content;
-      for (const piece of parser.process(chunk.content)) {
-        reportParserPiece(piece, reporter, stats, false);
-      }
-    }
-
-    if (chunk.finished_tool_calls?.length) {
-      for (const toolCall of chunk.finished_tool_calls) {
-        stats.totalToolCalls++;
-        const args = resolveToolCallArgs(toolCall);
-        reporter.reportToolCall(toolCall.id, toolCall.name, args);
-      }
-    }
+    inReasoningField = processStreamChunk(
+      chunk, parser, reporter, stats, inReasoningField, resolveToolCallArgs
+    );
   }
 
   // Flush any remaining buffered content. 'E' pieces here signal that the

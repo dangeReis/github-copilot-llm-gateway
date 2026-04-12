@@ -14,7 +14,6 @@
 
 export type RepairLogger = (message: string) => void;
 
-const BRACKET_ESCAPE_PATTERN = /[.*+?^${}()|[\]\\]/g;
 const TRAILING_COMMA_PATTERN = /,\s*([}\]])/g;
 const NOOP_LOGGER: RepairLogger = () => {
   /* no-op */
@@ -26,9 +25,30 @@ const NOOP_LOGGER: RepairLogger = () => {
  * that needs to respect JSON quoting rules. Exported for tests.
  */
 export function countChar(str: string, char: string): number {
-  const escapedChar = char.replaceAll(BRACKET_ESCAPE_PATTERN, String.raw`\$&`);
-  const regex = new RegExp(escapedChar, 'g');
-  return (str.match(regex) ?? []).length;
+  let count = 0;
+  for (const c of str) {
+    if (c === char) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Advance string-literal state by one character.
+ * Returns the updated [inString, escaped] pair.
+ */
+function advanceStringState(c: string, escaped: boolean): [boolean, boolean] {
+  if (escaped) {
+    return [true, false];
+  }
+  if (c === '\\') {
+    return [true, true];
+  }
+  if (c === '"') {
+    return [false, false];
+  }
+  return [true, false];
 }
 
 /**
@@ -46,38 +66,32 @@ export function balanceStructures(str: string): string {
   let inString = false;
   let escaped = false;
 
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
-
+  for (const c of str) {
     if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (c === '\\') {
-        escaped = true;
-        continue;
-      }
-      if (c === '"') {
-        inString = false;
-      }
+      [inString, escaped] = advanceStringState(c, escaped);
       continue;
     }
 
-    if (c === '"') {
-      inString = true;
-      continue;
-    }
-    if (c === '{' || c === '[') {
-      stack.push(c);
-      continue;
-    }
-    if (c === '}' && stack[stack.length - 1] === '{') {
-      stack.pop();
-      continue;
-    }
-    if (c === ']' && stack[stack.length - 1] === '[') {
-      stack.pop();
+    switch (c) {
+      case '"':
+        inString = true;
+        break;
+      case '{':
+      case '[':
+        stack.push(c);
+        break;
+      case '}':
+        if (stack[stack.length - 1] === '{') {
+          stack.pop();
+        }
+        break;
+      case ']':
+        if (stack[stack.length - 1] === '[') {
+          stack.pop();
+        }
+        break;
+      default:
+        break;
     }
   }
 
@@ -86,8 +100,7 @@ export function balanceStructures(str: string): string {
     result += '"';
   }
   while (stack.length > 0) {
-    const top = stack.pop();
-    result += top === '{' ? '}' : ']';
+    result += stack.pop() === '{' ? '}' : ']';
   }
   return result;
 }
