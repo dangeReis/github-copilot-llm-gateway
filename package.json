@@ -2,7 +2,7 @@
   "name": "github-copilot-llm-gateway",
   "displayName": "GitHub Copilot LLM Gateway",
   "description": "Connect GitHub Copilot to open-source models via vLLM or any OpenAI-compatible server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "AndrewButson",
   "icon": "assets/copilot-llm-gateway.png",
   "private": true,
@@ -84,19 +84,19 @@
         },
         "github.copilot.llm-gateway.defaultMaxTokens": {
           "type": "number",
-          "default": 32768,
-          "description": "Default maximum input tokens for models (context window)",
+          "default": 262144,
+          "description": "Fallback context window size (input tokens) when the server does not report it",
           "order": 4
         },
         "github.copilot.llm-gateway.defaultMaxOutputTokens": {
           "type": "number",
           "default": 4096,
-          "description": "Default maximum output tokens for models",
+          "description": "Fallback maximum output tokens when the server does not report context size",
           "order": 5
         },
         "github.copilot.llm-gateway.enableImageInput": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Enable image input capability for models that support multimodal requests",
           "order": 6
         },

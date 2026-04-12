@@ -22,13 +22,18 @@ This extension connects to any **OpenAI-compatible inference server**, giving yo
 
 ### Key Benefits
 
-| Benefit                | Description                                                                      |
-| ---------------------- | -------------------------------------------------------------------------------- |
-| **Data Sovereignty**   | Your code never leaves your network. All inference happens on your own hardware. |
-| **Zero API Costs**     | No per-token fees. Use your GPU resources without usage limits.                  |
-| **Model Choice**       | Access thousands of open-source models from Hugging Face and beyond.             |
-| **Offline Capable**    | Work without internet once models are downloaded.                                |
-| **Full Customization** | Fine-tune models for your specific codebase or domain.                           |
+| Benefit                | Description                                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Data Sovereignty**   | LLM inference stays on your network. All model requests are sent to your own server, never to GitHub. |
+| **Zero API Costs**     | No per-token fees. Use your GPU resources without usage limits.                                      |
+| **Model Choice**       | Access thousands of open-source models from Hugging Face and beyond.                                 |
+| **Full Customization** | Fine-tune models for your specific codebase or domain.                                               |
+
+> **Important privacy note**: This extension redirects **LLM inference requests only**. It runs
+> inside GitHub Copilot Chat, which independently requires GitHub authentication and may send
+> additional requests to GitHub servers (e.g. conversation title generation, telemetry). This
+> extension cannot intercept or block those requests. See [Privacy & Network Requests](#privacy--network-requests)
+> for details.
 
 ### Compatible Inference Servers
 
@@ -258,6 +263,37 @@ Access from the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 | Command                                                | Description                                 |
 | ------------------------------------------------------ | ------------------------------------------- |
 | **GitHub Copilot LLM Gateway: Test Server Connection** | Test connectivity and list available models |
+
+## Privacy & Network Requests
+
+This extension is a **Language Model provider** — it registers alongside GitHub's built-in models and handles inference when you select an LLM Gateway model. Understanding what it does and does not control is important:
+
+### What this extension controls
+
+- **Chat inference** — When you select an LLM Gateway model, all prompts, code snippets, and tool calls are sent exclusively to your configured server. None of this traffic touches GitHub.
+
+### What this extension does NOT control
+
+GitHub Copilot Chat is the host application. It performs its own network activity that this extension cannot intercept:
+
+| Request | Why it happens | What is sent |
+| --- | --- | --- |
+| **GitHub authentication** | Copilot Chat requires a GitHub sign-in to activate, even for third-party model providers | OAuth tokens |
+| **Conversation title generation** | Copilot Chat sends your first message to GitHub's API to auto-generate a title | Your prompt text |
+| **Telemetry** | Copilot collects usage telemetry per its own policies | Usage metadata |
+
+### Reducing exposure
+
+While you cannot fully eliminate GitHub network requests when using Copilot Chat, you can minimise them:
+
+- Set `"telemetry.telemetryLevel": "off"` in VS Code settings
+- Set `"github.copilot.advanced": { "authProvider": "github" }` telemetry-related options as available
+
+> **Note**: We have no control over the Copilot Chat host extension's behaviour. If full network
+> isolation is important to your use case, we encourage you to request upstream changes on the
+> [VS Code Copilot repository](https://github.com/microsoft/vscode-copilot-release) — specifically,
+> that title generation should use the selected model provider rather than hardcoded GitHub endpoints,
+> and that authentication should be optional when only third-party providers are in use.
 
 ## Support
 
