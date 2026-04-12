@@ -20,13 +20,16 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node"
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
+    "types": ["node"]
   },
   "include": [
     "src/**/*"
   ],
   "exclude": [
     "node_modules",
-    ".vscode-test"
+    ".vscode-test",
+    "src/__tests__"
   ]
 }

@@ -7,6 +7,8 @@ eslint.config.mjs
 **/*.map
 **/*.ts
 tsconfig.json
+tsconfig.test.json
+out-test/**
 node_modules/**
 *.vsix
 .devcontainer/**

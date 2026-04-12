@@ -1,9 +1,7 @@
-import eslint from '@eslint/js';
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 
 export default [
-  eslint.configs.recommended,
   {
     files: ['**/*.ts'],
     languageOptions: {
@@ -43,9 +41,6 @@ export default [
         },
       ],
       '@typescript-eslint/no-explicit-any': 'warn',
-      // TypeScript handles undefined-identifier detection more accurately than ESLint's
-      // no-undef, which doesn't know about lib.d.ts / @types/node globals.
-      'no-undef': 'off',
       '@typescript-eslint/no-unused-vars': [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
@@ -55,6 +50,9 @@ export default [
       'no-throw-literal': 'warn',
       'no-console': 'warn',
       'no-unused-vars': 'off',
+      // TypeScript handles undefined-identifier detection more accurately than ESLint's
+      // no-undef, which doesn't know about lib.d.ts / @types/node globals.
+      'no-undef': 'off',
       semi: ['warn', 'always'],
       'prefer-const': 'warn',
       'default-case': 'warn',
@@ -62,6 +60,6 @@ export default [
     },
   },
   {
-    ignores: ['out/**', 'node_modules/**', '*.mjs'],
+    ignores: ['out/**', 'out-test/**', 'node_modules/**', '*.mjs'],
   },
 ];
