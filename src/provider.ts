@@ -501,7 +501,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       );
       this.promptToolCallingError();
     } else {
-      void vscode.window.showErrorMessage(
+      vscode.window.showErrorMessage(
         `GitHub Copilot LLM Gateway: Chat request failed. ${errorMessage}`
       );
     }
@@ -513,7 +513,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     vscode.window.showErrorMessage(message, 'Open Settings').then(
       (selection: string | undefined) => {
         if (selection === 'Open Settings') {
-          void vscode.commands.executeCommand(
+          vscode.commands.executeCommand(
             'workbench.action.openSettings',
             'github.copilot.llm-gateway'
           );
@@ -539,7 +539,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           if (selection === 'Open Output') {
             this.outputChannel.show();
           } else if (selection === 'Disable Tool Calling') {
-            void vscode.workspace
+            vscode.workspace
               .getConfiguration('github.copilot.llm-gateway')
               .update('enableToolCalling', false, vscode.ConfigurationTarget.Global);
           }
@@ -558,7 +558,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     }
     this.hasShownWelcomeNotification = true;
 
-    void vscode.window.withProgress(
+    vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
         title: `LLM Gateway: ${modelId}  —  [Settings](command:workbench.action.openSettings?%22github.copilot.llm-gateway%22)`,
@@ -610,7 +610,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       this.outputChannel.appendLine(
         `WARNING: github.copilot.llm-gateway.defaultMaxOutputTokens (${cfg.defaultMaxOutputTokens}) >= defaultMaxTokens (${cfg.defaultMaxTokens}). Adjusting to ${adjusted}.`
       );
-      void vscode.window.showWarningMessage(
+      vscode.window.showWarningMessage(
         `GitHub Copilot LLM Gateway: 'defaultMaxOutputTokens' was >= 'defaultMaxTokens'. Adjusted to ${adjusted} to avoid request errors.`
       );
       cfg.defaultMaxOutputTokens = adjusted;

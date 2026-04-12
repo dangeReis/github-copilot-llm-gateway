@@ -24,16 +24,16 @@ export function activate(context: vscode.ExtensionContext): void {
         );
 
         if (models.length > 0) {
-          void vscode.window.showInformationMessage(
+          vscode.window.showInformationMessage(
             `GitHub Copilot LLM Gateway: Successfully connected! Found ${models.length} model(s): ${models.map((m) => m.name).join(', ')}`
           );
         } else {
-          void vscode.window.showWarningMessage(
+          vscode.window.showWarningMessage(
             'GitHub Copilot LLM Gateway: Connected but no models found.'
           );
         }
       } catch (error) {
-        void vscode.window.showErrorMessage(
+        vscode.window.showErrorMessage(
           `GitHub Copilot LLM Gateway: Connection test failed. ${error instanceof Error ? error.message : String(error)}`
         );
       }

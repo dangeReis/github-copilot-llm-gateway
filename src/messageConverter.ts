@@ -120,8 +120,8 @@ export function convertMessage(
         break;
 
       default: {
-        const _exhaustive: never = part;
-        void _exhaustive;
+        const _never: never = part;
+        throw new Error(`Unexpected part kind: ${String(_never)}`);
       }
     }
   }
