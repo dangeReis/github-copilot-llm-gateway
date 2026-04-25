@@ -24,7 +24,7 @@ describe('ToolCallAccumulator', () => {
     const finished = acc.drain();
     assert.equal(finished.length, 2);
     assert.deepEqual(
-      finished.map((c) => c.name).sort(),
+      finished.map((c) => c.name).sort((a, b) => a.localeCompare(b)),
       ['first', 'second']
     );
   });

@@ -639,12 +639,14 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
     for (let i = 0; i < openAIMessages.length; i++) {
       const msg = openAIMessages[i];
       const toolCallId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : 'none';
-      const hasContent =
-        typeof msg.content === 'string'
-          ? msg.content.length > 0
-          : Array.isArray(msg.content)
-            ? msg.content.length > 0
-            : msg.content !== null && msg.content !== undefined;
+      let hasContent: boolean;
+      if (typeof msg.content === 'string') {
+        hasContent = msg.content.length > 0;
+      } else if (Array.isArray(msg.content)) {
+        hasContent = msg.content.length > 0;
+      } else {
+        hasContent = msg.content !== null && msg.content !== undefined;
+      }
       const hasToolCalls = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
       this.outputChannel.appendLine(
         `  Message ${i + 1}: role=${msg.role}, hasContent=${hasContent}, hasToolCalls=${hasToolCalls}, toolCallId=${toolCallId}`
@@ -868,7 +870,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       // Only pop a toast when the values the user is typing actually change,
       // otherwise every keystroke during settings editing produces a warning.
       const last = this.lastOutputTokenAdjustmentNotified;
-      if (!last || last.output !== cfg.defaultMaxOutputTokens || last.total !== cfg.defaultMaxTokens) {
+      if (last?.output !== cfg.defaultMaxOutputTokens || last?.total !== cfg.defaultMaxTokens) {
         this.lastOutputTokenAdjustmentNotified = {
           output: cfg.defaultMaxOutputTokens,
           total: cfg.defaultMaxTokens,

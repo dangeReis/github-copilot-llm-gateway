@@ -9,9 +9,7 @@
 
 import { OpenAIChatCompletionRequest, OpenAIMessage, OpenAIToolDefinition } from './types';
 
-// Re-export so existing callers that imported OpenAIToolDefinition from
-// './requestBuilder' keep compiling without churn.
-export { OpenAIToolDefinition };
+export type { OpenAIToolDefinition } from './types';
 
 export type ToolChoice = 'auto' | 'required' | 'none';
 

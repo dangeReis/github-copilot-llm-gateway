@@ -110,25 +110,8 @@ export class GatewayClient {
       const url = candidates[i];
       const isLast = i === candidates.length - 1;
       try {
-        const response = await this.fetchWithTimeout(url, {
-          method: 'GET',
-          headers: this.getHeaders(),
-        }, cancellationToken);
-
-        if (response.ok) {
-          return await response.json();
-        }
-
-        if (response.status === 404 && !isLast) {
-          this.log(`Models endpoint not found at ${url}, trying fallback...`);
-          continue;
-        }
-
-        const bodyText = await response.text().catch(() => '');
-        const truncated = bodyText.length > 200 ? `${bodyText.slice(0, 200)}...` : bodyText;
-        throw new Error(
-          `Failed to fetch models from ${url}: ${response.status} ${response.statusText}${truncated ? ` — ${truncated}` : ''}`
-        );
+        const result = await this.tryFetchModels(url, isLast, cancellationToken);
+        if (result) { return result; }
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         if (isLast) { break; }
@@ -137,6 +120,38 @@ export class GatewayClient {
 
     const message = lastError?.message ?? 'unknown error';
     throw new Error(`Failed to connect to inference server at ${base}: ${message}`);
+  }
+
+  /**
+   * Attempt a single model-fetch against `url`. Returns the parsed response
+   * on success, `undefined` if the endpoint returned 404 and `allowFallback`
+   * is true, or throws on any other failure.
+   */
+  private async tryFetchModels(
+    url: string,
+    isLast: boolean,
+    cancellationToken?: vscode.CancellationToken
+  ): Promise<OpenAIModelsResponse | undefined> {
+    const response = await this.fetchWithTimeout(url, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    }, cancellationToken);
+
+    if (response.ok) {
+      return await response.json();
+    }
+
+    if (response.status === 404 && !isLast) {
+      this.log(`Models endpoint not found at ${url}, trying fallback...`);
+      return undefined;
+    }
+
+    const bodyText = await response.text().catch(() => '');
+    const truncated = bodyText.length > 200 ? bodyText.slice(0, 200) + '...' : bodyText;
+    const suffix = truncated ? ' — ' + truncated : '';
+    throw new Error(
+      `Failed to fetch models from ${url}: ${response.status} ${response.statusText}${suffix}`
+    );
   }
 
   /**
