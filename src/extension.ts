@@ -135,9 +135,14 @@ export function activate(context: vscode.ExtensionContext): void {
       });
       if (apiKey === undefined) { return; } // cancelled
 
-      await config.update('serverUrl', url, vscode.ConfigurationTarget.Global);
+      // Let the user choose Workspace vs. User scope so different VS Code
+      // windows can point at different inference servers (issue #23).
+      const target = await pickConfigurationTarget(config);
+      if (target === undefined) { return; } // cancelled
+
+      await config.update('serverUrl', url, target);
       if (apiKey) {
-        await config.update('apiKey', apiKey, vscode.ConfigurationTarget.Global);
+        await config.update('apiKey', apiKey, target);
       }
 
       // The config-change listener handles reloadConfig + model refresh
@@ -173,4 +178,49 @@ export function activate(context: vscode.ExtensionContext): void {
  */
 export function deactivate(): void {
   // no-op
+}
+
+/**
+ * Asks the user whether to save settings to Workspace or User (Global) scope.
+ * Returns undefined if cancelled, or skips the prompt and returns Global when
+ * no workspace folder is open (the only meaningful scope in that case).
+ *
+ * Defaults the highlighted option to whichever scope already has a value, and
+ * otherwise prefers Workspace when a folder is open — most users hitting this
+ * picker want per-window configuration (issue #23).
+ */
+async function pickConfigurationTarget(
+  config: vscode.WorkspaceConfiguration
+): Promise<vscode.ConfigurationTarget | undefined> {
+  const hasWorkspaceFolder = (vscode.workspace.workspaceFolders?.length ?? 0) > 0;
+  if (!hasWorkspaceFolder) {
+    return vscode.ConfigurationTarget.Global;
+  }
+
+  const inspection = config.inspect('serverUrl');
+  const workspacePick: vscode.QuickPickItem = {
+    label: 'Workspace Settings',
+    description: inspection?.workspaceValue !== undefined ? '(currently set)' : undefined,
+    detail: 'Apply to this workspace only — different VS Code windows can use different servers.',
+  };
+  const globalPick: vscode.QuickPickItem = {
+    label: 'User Settings (Global)',
+    description: inspection?.globalValue !== undefined ? '(currently set)' : undefined,
+    detail: 'Apply to all VS Code windows.',
+  };
+
+  const items = inspection?.globalValue !== undefined && inspection?.workspaceValue === undefined
+    ? [globalPick, workspacePick]
+    : [workspacePick, globalPick];
+
+  const pick = await vscode.window.showQuickPick(items, {
+    title: 'LLM Gateway — Save settings to',
+    placeHolder: 'Choose where these settings should apply',
+    ignoreFocusOut: true,
+  });
+  if (!pick) { return undefined; }
+
+  return pick === workspacePick
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
 }
