@@ -2,7 +2,7 @@
   "name": "github-copilot-llm-gateway",
   "displayName": "GitHub Copilot LLM Gateway",
   "description": "Connect GitHub Copilot to open-source models via vLLM or any OpenAI-compatible server",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "publisher": "AndrewButson",
   "icon": "assets/copilot-llm-gateway.png",
   "private": true,
@@ -140,7 +140,9 @@
         "github.copilot.llm-gateway.customHeaders": {
           "type": "object",
           "default": {},
-          "additionalProperties": { "type": "string" },
+          "additionalProperties": {
+            "type": "string"
+          },
           "description": "Additional HTTP headers sent with every request to the inference server (e.g. Anthropic-Version, OpenAI-Organization, HTTP-Referer). Set as key/value pairs.",
           "order": 11
         },
