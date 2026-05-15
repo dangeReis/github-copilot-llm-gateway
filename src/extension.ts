@@ -4,10 +4,14 @@ import { GatewayProvider } from './provider';
 const STATUS_BAR_PROBE_DELAY_MS = 1500;
 
 /**
- * Extension activation
+ * Extension activation. Async so we can pull the API key + custom headers
+ * out of SecretStorage (and migrate legacy plain-text settings, issue #28)
+ * before registering the provider — otherwise the first model fetch races
+ * the secret load and is sent unauthenticated.
  */
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const provider = new GatewayProvider(context);
+  await provider.loadSecrets();
 
   const disposable = vscode.lm.registerLanguageModelChatProvider(
     'copilot-llm-gateway',
@@ -101,8 +105,9 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(testCommand);
 
   // "Configure Server" command — triggered by the "Add Models..." dropdown
-  // via the managementCommand contribution. Prompts for server URL and API
-  // key, writes them to the extension's settings, and refreshes models.
+  // via the managementCommand contribution. Prompts for server URL (stored
+  // in workspace/user settings) and API key (stored in SecretStorage,
+  // issue #28). Refreshes the model list when done.
   const manageCommand = vscode.commands.registerCommand(
     'github.copilot.llm-gateway.manage',
     async () => {
@@ -128,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       const apiKey = await vscode.window.showInputBox({
         title: 'LLM Gateway — API Key',
-        prompt: 'Enter the API key (leave empty if not required)',
+        prompt: 'Enter the API key — saved to VS Code\'s secret storage. Leave empty to clear.',
         password: true,
         placeHolder: 'Optional',
         ignoreFocusOut: true,
@@ -136,25 +141,42 @@ export function activate(context: vscode.ExtensionContext): void {
       if (apiKey === undefined) { return; } // cancelled
 
       // Let the user choose Workspace vs. User scope so different VS Code
-      // windows can point at different inference servers (issue #23).
+      // windows can point at different inference servers (issue #23). Only
+      // applies to `serverUrl` — the API key is always global because
+      // SecretStorage isn't workspace-aware.
       const target = await pickConfigurationTarget(config);
       if (target === undefined) { return; } // cancelled
 
       await config.update('serverUrl', url, target);
-      if (apiKey) {
-        await config.update('apiKey', apiKey, target);
-      }
+      await provider.setApiKey(apiKey);
 
       // The config-change listener handles reloadConfig + model refresh
       // automatically, but we also refresh the status bar here.
       provider.invalidateModelCache();
+      provider.refreshModels();
       await refreshStatusBar();
 
-      await offerAdvancedSettings();
+      await offerAdvancedSettings(provider);
     }
   );
 
   context.subscriptions.push(manageCommand);
+
+  // "Edit Custom Headers" command — lets users manage additional HTTP
+  // headers (e.g. `Authorization: Token …`, `Anthropic-Version`) without
+  // touching settings.json. Values are persisted via SecretStorage because
+  // these headers commonly carry credentials (issue #28).
+  const editHeadersCommand = vscode.commands.registerCommand(
+    'github.copilot.llm-gateway.editCustomHeaders',
+    async () => {
+      await editCustomHeadersFlow(provider);
+      provider.invalidateModelCache();
+      provider.refreshModels();
+      await refreshStatusBar();
+    }
+  );
+
+  context.subscriptions.push(editHeadersCommand);
 
   // Explicit "Refresh Models" command — previously users could only trigger
   // a re-fetch by editing settings, which was confusing when models
@@ -183,33 +205,171 @@ export function deactivate(): void {
 }
 
 /**
- * After the basic Configure Server flow, offer the user a chance to jump
- * straight to the Settings UI for advanced options (custom headers, extra
- * model options) that aren't worth dedicated InputBox steps. The Settings UI
- * is filtered to this extension so the headers key/value table is one click
- * away.
+ * After the basic Configure Server flow, offer the user a chance to edit
+ * custom headers (kept in SecretStorage, issue #28) or jump to the Settings
+ * UI for the remaining non-secret options.
  */
-async function offerAdvancedSettings(): Promise<void> {
+async function offerAdvancedSettings(provider: GatewayProvider): Promise<void> {
   const completePick: vscode.QuickPickItem = {
     label: 'Complete',
     description: 'Finish configuration',
   };
+  const headersPick: vscode.QuickPickItem = {
+    label: 'Edit custom headers...',
+    description: 'Add or remove HTTP headers (stored in secret storage)',
+  };
   const advancedPick: vscode.QuickPickItem = {
     label: 'Edit advanced settings...',
-    description: 'Custom headers, extra model options, timeouts, logging',
+    description: 'Extra model options, timeouts, logging',
   };
 
-  const pick = await vscode.window.showQuickPick([completePick, advancedPick], {
-    title: 'LLM Gateway — Configuration saved',
-    placeHolder: 'Done, or open advanced settings?',
-    ignoreFocusOut: true,
-  });
-  if (pick === advancedPick) {
+  const pick = await vscode.window.showQuickPick(
+    [completePick, headersPick, advancedPick],
+    {
+      title: 'LLM Gateway — Configuration saved',
+      placeHolder: 'Done, or continue to advanced options?',
+      ignoreFocusOut: true,
+    }
+  );
+  if (pick === headersPick) {
+    await editCustomHeadersFlow(provider);
+  } else if (pick === advancedPick) {
     await vscode.commands.executeCommand(
       'workbench.action.openSettings',
       'github.copilot.llm-gateway'
     );
   }
+}
+
+/**
+ * Quick-pick driven editor for custom headers persisted in SecretStorage.
+ * Shows only header names (not values) so peeking at someone else's screen
+ * doesn't leak credentials, and supports add / edit / delete / clear-all.
+ */
+async function editCustomHeadersFlow(provider: GatewayProvider): Promise<void> {
+  while (true) {
+    const headers = provider.getCustomHeadersSnapshot();
+    const headerNames = Object.keys(headers).sort();
+
+    interface HeaderItem extends vscode.QuickPickItem {
+      action: 'add' | 'edit' | 'clear' | 'done';
+      headerName?: string;
+    }
+
+    const items: HeaderItem[] = [
+      { label: 'Done', description: 'Save and close', action: 'done' },
+      { label: '$(add) Add header...', description: 'Add a new header', action: 'add' },
+    ];
+    if (headerNames.length > 0) {
+      items.push({
+        label: '$(trash) Clear all headers',
+        description: 'Remove every custom header',
+        action: 'clear',
+      });
+      items.push({
+        label: '',
+        kind: vscode.QuickPickItemKind.Separator,
+        action: 'done',
+      });
+      for (const name of headerNames) {
+        items.push({
+          label: name,
+          description: 'Edit or remove (value hidden)',
+          action: 'edit',
+          headerName: name,
+        });
+      }
+    }
+
+    const pick = await vscode.window.showQuickPick(items, {
+      title: `LLM Gateway — Custom Headers (${headerNames.length})`,
+      placeHolder:
+        headerNames.length === 0
+          ? 'No custom headers yet. Add one or close.'
+          : 'Select a header to edit, or add a new one',
+      ignoreFocusOut: true,
+    });
+    if (!pick || pick.action === 'done') { return; }
+
+    if (pick.action === 'add') {
+      await addHeader(provider, headers);
+      continue;
+    }
+    if (pick.action === 'clear') {
+      const confirm = await vscode.window.showWarningMessage(
+        `Remove all ${headerNames.length} custom header(s)?`,
+        { modal: true },
+        'Remove'
+      );
+      if (confirm === 'Remove') {
+        await provider.setCustomHeaders({});
+      }
+      continue;
+    }
+    if (pick.action === 'edit' && pick.headerName) {
+      await editOrDeleteHeader(provider, headers, pick.headerName);
+    }
+  }
+}
+
+async function addHeader(
+  provider: GatewayProvider,
+  current: Record<string, string>
+): Promise<void> {
+  const name = await vscode.window.showInputBox({
+    title: 'LLM Gateway — New header name',
+    prompt: 'e.g. Authorization, Anthropic-Version, HTTP-Referer',
+    ignoreFocusOut: true,
+    validateInput: (value) => {
+      if (value.trim().length === 0) { return 'Header name cannot be empty'; }
+      if (/[^\w-]/.test(value)) { return 'Header names typically only contain letters, digits, and dashes'; }
+      return undefined;
+    },
+  });
+  if (!name) { return; }
+  const value = await vscode.window.showInputBox({
+    title: `LLM Gateway — Value for ${name}`,
+    prompt: 'Saved to VS Code\'s secret storage',
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (value === undefined) { return; }
+  await provider.setCustomHeaders({ ...current, [name.trim()]: value });
+}
+
+async function editOrDeleteHeader(
+  provider: GatewayProvider,
+  current: Record<string, string>,
+  name: string
+): Promise<void> {
+  const action = await vscode.window.showQuickPick(
+    [
+      { label: 'Edit value', description: 'Replace the current value' },
+      { label: 'Remove header', description: 'Delete this header entirely' },
+    ],
+    {
+      title: `LLM Gateway — ${name}`,
+      placeHolder: 'Choose an action',
+      ignoreFocusOut: true,
+    }
+  );
+  if (!action) { return; }
+
+  if (action.label === 'Remove header') {
+    const next = { ...current };
+    delete next[name];
+    await provider.setCustomHeaders(next);
+    return;
+  }
+
+  const value = await vscode.window.showInputBox({
+    title: `LLM Gateway — New value for ${name}`,
+    prompt: 'Saved to VS Code\'s secret storage',
+    password: true,
+    ignoreFocusOut: true,
+  });
+  if (value === undefined) { return; }
+  await provider.setCustomHeaders({ ...current, [name]: value });
 }
 
 /**

@@ -2,7 +2,7 @@
   "name": "github-copilot-llm-gateway",
   "displayName": "GitHub Copilot LLM Gateway",
   "description": "Connect GitHub Copilot to open-source models via vLLM or any OpenAI-compatible server",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "publisher": "AndrewButson",
   "icon": "assets/copilot-llm-gateway.png",
   "private": true,
@@ -70,6 +70,11 @@
         "command": "github.copilot.llm-gateway.refreshModels",
         "title": "Refresh Models",
         "category": "GitHub Copilot LLM Gateway"
+      },
+      {
+        "command": "github.copilot.llm-gateway.editCustomHeaders",
+        "title": "Edit Custom Headers",
+        "category": "GitHub Copilot LLM Gateway"
       }
     ],
     "configuration": {
@@ -84,7 +89,8 @@
         "github.copilot.llm-gateway.apiKey": {
           "type": "string",
           "default": "",
-          "description": "API key for authentication (optional, leave empty if not required)",
+          "description": "Deprecated. Use the 'Configure Server' command to store the API key in VS Code's secret storage. Any value entered here is migrated and cleared on extension activation.",
+          "deprecationMessage": "API keys are now stored in VS Code's secret storage. Use the 'GitHub Copilot LLM Gateway: Configure Server' command to set the API key.",
           "order": 2
         },
         "github.copilot.llm-gateway.requestTimeout": {
@@ -143,7 +149,8 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "Additional HTTP headers sent with every request to the inference server (e.g. Anthropic-Version, OpenAI-Organization, HTTP-Referer). Set as key/value pairs.",
+          "description": "Deprecated. Use the 'Edit Custom Headers' command to store headers in VS Code's secret storage. Any value entered here is migrated and cleared on extension activation.",
+          "deprecationMessage": "Custom headers (which may carry credentials such as 'Authorization') are now stored in VS Code's secret storage. Use the 'GitHub Copilot LLM Gateway: Edit Custom Headers' command.",
           "order": 11
         },
         "github.copilot.llm-gateway.extraModelOptions": {

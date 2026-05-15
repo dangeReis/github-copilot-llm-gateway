@@ -31,6 +31,14 @@ import {
   inferModelFamily,
 } from './modelDisplay';
 import { diagnoseModelFetchError } from './errorDiagnostics';
+import {
+  ConfigurationTarget as SecretConfigurationTarget,
+  LegacyConfigAccessor,
+  SECRET_KEYS,
+  formatMigrationToast,
+  migrateLegacySecrets,
+  parseCustomHeadersJson,
+} from './secretMigration';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60000;
 const DEFAULT_TEMPERATURE = 0.7;
@@ -67,6 +75,11 @@ function describeToolMode(toolMode: vscode.LanguageModelChatToolMode | undefined
  * server (and so require VS Code to re-request it). Other keys like
  * `agentTemperature` don't, so we don't want to fire the change event for
  * them — otherwise every keystroke in the settings UI triggers a re-fetch.
+ *
+ * `apiKey` and `customHeaders` are intentionally listed here for the
+ * backward-compat path: if a user re-adds a legacy value to settings.json,
+ * the config-change handler triggers a re-migration into SecretStorage and a
+ * model refresh (issue #28). Those settings are deprecated for direct use.
  */
 const MODEL_AFFECTING_KEYS: readonly string[] = [
   'github.copilot.llm-gateway.serverUrl',
@@ -76,6 +89,16 @@ const MODEL_AFFECTING_KEYS: readonly string[] = [
   'github.copilot.llm-gateway.defaultMaxOutputTokens',
   'github.copilot.llm-gateway.enableImageInput',
   'github.copilot.llm-gateway.enableToolCalling',
+  'github.copilot.llm-gateway.customHeaders',
+];
+
+/**
+ * Legacy plain-text settings that we still watch on the config-change event
+ * so a user manually re-adding them in `settings.json` gets re-migrated into
+ * SecretStorage instead of silently sitting in plain text (issue #28).
+ */
+const LEGACY_SECRET_KEYS: readonly string[] = [
+  'github.copilot.llm-gateway.apiKey',
   'github.copilot.llm-gateway.customHeaders',
 ];
 
@@ -90,6 +113,18 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private readonly client: GatewayClient;
   private config: GatewayConfig;
   private readonly outputChannel: vscode.OutputChannel;
+  private readonly secrets: vscode.SecretStorage;
+  /**
+   * Snapshot of secret values read from `vscode.ExtensionContext.secrets`.
+   * `loadConfig` is synchronous (called from the constructor and every
+   * config-change event), so we cache the secret values here and refresh the
+   * cache via `loadSecrets` / `setApiKey` / `setCustomHeaders` instead of
+   * hitting SecretStorage on every read.
+   */
+  private secretCache: { apiKey: string; customHeaders: Record<string, string> } = {
+    apiKey: '',
+    customHeaders: {},
+  };
   /**
    * Real server-reported context per model id (`max_model_len` / etc.).
    * Needed because the picker-facing `maxInputTokens` is the full context
@@ -115,6 +150,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
 
   constructor(context: vscode.ExtensionContext) {
     this.outputChannel = vscode.window.createOutputChannel('GitHub Copilot LLM Gateway');
+    this.secrets = context.secrets;
     this.config = this.loadConfig();
     this.client = new GatewayClient(this.config, (msg) => this.outputChannel.appendLine(msg));
 
@@ -126,6 +162,13 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
           return;
         }
         this.outputChannel.appendLine('Configuration changed, reloading...');
+        // If a deprecated legacy secret setting just gained a value (manually
+        // typed into settings.json or pasted via the settings UI), pull it
+        // back into SecretStorage and clear the plain-text copy. Errors are
+        // logged but never thrown — the config-change listener can't be async.
+        if (LEGACY_SECRET_KEYS.some((key) => e.affectsConfiguration(key))) {
+          void this.reMigrateLegacySecrets();
+        }
         this.reloadConfig();
         // Only nudge VS Code to refetch models when a setting that actually
         // affects the model list has changed.
@@ -133,8 +176,140 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
         if (affectsModels) {
           this._onDidChangeLanguageModelChatInformation.fire();
         }
+      }),
+      this.secrets.onDidChange((e: vscode.SecretStorageChangeEvent) => {
+        if (e.key !== SECRET_KEYS.apiKey && e.key !== SECRET_KEYS.customHeaders) {
+          return;
+        }
+        // Another VS Code window (or our own setApiKey) updated a secret —
+        // refresh the cache + config so subsequent requests use the new
+        // values. Errors here would silently produce stale credentials, so
+        // we surface them in the output channel.
+        void this.refreshSecretCache().catch((err: unknown) => {
+          this.outputChannel.appendLine(
+            `Failed to refresh secret cache after change: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
       })
     );
+  }
+
+  /**
+   * Called from `extension.activate` after construction so the first chat
+   * request uses the right credentials. Performs one-time migration of legacy
+   * plain-text settings into SecretStorage and surfaces a single toast if
+   * anything was actually moved.
+   */
+  public async loadSecrets(): Promise<void> {
+    const config = this.legacyConfigAccessor();
+    try {
+      const result = await migrateLegacySecrets(config, this.secrets, (m) =>
+        this.outputChannel.appendLine(m)
+      );
+      const toast = formatMigrationToast(result);
+      if (toast) {
+        vscode.window.showInformationMessage(toast);
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(
+        `Failed to migrate legacy secrets: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    await this.refreshSecretCache();
+  }
+
+  /**
+   * Persist a new API key in SecretStorage and refresh the cache. Pass `''`
+   * to clear the stored key. Called from the Configure Server command.
+   */
+  public async setApiKey(apiKey: string): Promise<void> {
+    const trimmed = apiKey.trim();
+    if (trimmed.length === 0) {
+      await this.secrets.delete(SECRET_KEYS.apiKey);
+    } else {
+      await this.secrets.store(SECRET_KEYS.apiKey, trimmed);
+    }
+    // `onDidChange` will repopulate the cache, but we also refresh
+    // synchronously so callers can immediately use the new value.
+    await this.refreshSecretCache();
+  }
+
+  /**
+   * Persist a new customHeaders map in SecretStorage and refresh the cache.
+   * Pass `{}` to clear the stored headers. Called from the Edit Custom
+   * Headers command.
+   */
+  public async setCustomHeaders(headers: Record<string, string>): Promise<void> {
+    if (Object.keys(headers).length === 0) {
+      await this.secrets.delete(SECRET_KEYS.customHeaders);
+    } else {
+      await this.secrets.store(SECRET_KEYS.customHeaders, JSON.stringify(headers));
+    }
+    await this.refreshSecretCache();
+  }
+
+  /** Snapshot of the cached custom headers — used by the Edit flow. */
+  public getCustomHeadersSnapshot(): Record<string, string> {
+    return { ...this.secretCache.customHeaders };
+  }
+
+  private async refreshSecretCache(): Promise<void> {
+    const apiKey = await this.secrets.get(SECRET_KEYS.apiKey);
+    const headersJson = await this.secrets.get(SECRET_KEYS.customHeaders);
+    this.secretCache = {
+      apiKey: apiKey ?? '',
+      customHeaders: parseCustomHeadersJson(headersJson, (m) =>
+        this.outputChannel.appendLine(m)
+      ),
+    };
+    this.reloadConfig();
+  }
+
+  private async reMigrateLegacySecrets(): Promise<void> {
+    try {
+      const result = await migrateLegacySecrets(
+        this.legacyConfigAccessor(),
+        this.secrets,
+        (m) => this.outputChannel.appendLine(m)
+      );
+      if (result.apiKeyMigrated || result.customHeadersMigrated) {
+        // No toast on the re-migration path — the user is actively editing
+        // settings and a popup mid-keystroke is jarring. The output channel
+        // line is enough for diagnostics.
+        await this.refreshSecretCache();
+      }
+    } catch (error) {
+      this.outputChannel.appendLine(
+        `Failed to re-migrate legacy secret setting: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /**
+   * Adapter from `vscode.WorkspaceConfiguration` to the
+   * `LegacyConfigAccessor` interface the migration helpers expect. Done as a
+   * small wrapper so the migration logic can be unit-tested without `vscode`.
+   */
+  private legacyConfigAccessor(): LegacyConfigAccessor {
+    const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
+    return {
+      get: <T>(section: string, defaultValue: T): T => config.get<T>(section, defaultValue),
+      inspect: <T>(section: string) => {
+        const inspection = config.inspect<T>(section);
+        if (!inspection) { return undefined; }
+        return {
+          workspaceValue: inspection.workspaceValue,
+          globalValue: inspection.globalValue,
+        };
+      },
+      update: async (section: string, value: unknown, target: SecretConfigurationTarget) => {
+        const vsTarget =
+          target === SecretConfigurationTarget.Workspace
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+        await config.update(section, value, vsTarget);
+      },
+    };
   }
 
   /**
@@ -817,9 +992,15 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
   private loadConfig(): GatewayConfig {
     const config = vscode.workspace.getConfiguration('github.copilot.llm-gateway');
 
+    // `apiKey` and `customHeaders` come from the in-memory secret cache
+    // populated by `loadSecrets` / `refreshSecretCache`. The legacy
+    // plain-text settings of the same name are still read by the migration
+    // path, but are cleared once their values are safely in SecretStorage
+    // (issue #28). Until `loadSecrets` runs, the cache holds empty values —
+    // an early model fetch would just send unauthenticated requests.
     const cfg: GatewayConfig = {
       serverUrl: config.get<string>('serverUrl', 'http://localhost:8000'),
-      apiKey: config.get<string>('apiKey', ''),
+      apiKey: this.secretCache.apiKey,
       requestTimeout: config.get<number>('requestTimeout', DEFAULT_REQUEST_TIMEOUT_MS),
       defaultMaxTokens: config.get<number>('defaultMaxTokens', TOKEN_CONSTANTS.DEFAULT_CONTEXT_TOKENS),
       defaultMaxOutputTokens: config.get<number>(
@@ -831,7 +1012,7 @@ export class GatewayProvider implements vscode.LanguageModelChatProvider {
       parallelToolCalling: config.get<boolean>('parallelToolCalling', true),
       agentTemperature: config.get<number>('agentTemperature', 0),
       verboseLogging: config.get<boolean>('verboseLogging', false),
-      customHeaders: config.get<Record<string, string>>('customHeaders', {}) ?? {},
+      customHeaders: { ...this.secretCache.customHeaders },
       extraModelOptions: config.get<Record<string, unknown>>('extraModelOptions', {}) ?? {},
     };
 
