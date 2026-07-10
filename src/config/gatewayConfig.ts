@@ -25,6 +25,7 @@ export interface GatewayConfig {
    * wrong size or none at all, e.g. llama-server router mode (issue #55).
    */
   modelContextWindows: Record<string, number>;
+
   /**
    * Experimental inline (fill-in-the-middle) code completion settings. Powers a
    * standalone completion provider that runs alongside — not through — GitHub
