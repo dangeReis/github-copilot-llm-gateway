@@ -51,6 +51,7 @@ export class ModelCatalog {
    * on config reload since the server (or its presets) may have changed.
    */
   private readonly learnedContextByModelId: Map<string, number> = new Map();
+  private readonly originalModelIdMap: Map<string, string> = new Map();
   private lastSuccessfulFetchAt?: number;
   private lastConnectionError?: string;
 
@@ -59,6 +60,10 @@ export class ModelCatalog {
   /** Most recent successful fetch result, or empty when none is cached. */
   public getCachedModels(): LanguageModelChatInformation[] {
     return this.fetchLast?.result ?? [];
+  }
+
+  public getRealModelId(modelId: string): string {
+    return this.originalModelIdMap.get(modelId) ?? modelId;
   }
 
   public getContextForModel(modelId: string): number | undefined {
@@ -201,18 +206,28 @@ export class ModelCatalog {
       );
     }
 
-    // Rebuild the per-id context map from the latest fetch. If the server
+    // Rebuild the per-id context map and ID mapping from the latest fetch. If the server
     // removed a model, drop its entry so stale data can't leak into future
     // chat requests.
     this.contextByModelId.clear();
+    this.originalModelIdMap.clear();
 
     const models = uniqueModels.map((model) => {
+      const originalId = model.id;
+      let registeredId = model.id;
+      if (originalId.toLowerCase().includes('diffusion')) {
+        registeredId = originalId.replace(/diffusion/gi, 'diff');
+        this.originalModelIdMap.set(registeredId, originalId);
+      }
+
       const contextOverride = resolveContextWindowOverride(
-        model.id,
+        originalId,
         config.modelContextWindows
       );
+
+      const modelForInfo = { ...model, id: registeredId };
       const { info, totalContext, hasServerReportedContext } = buildModelInfo({
-        model,
+        model: modelForInfo,
         defaultMaxTokens: config.defaultMaxTokens,
         defaultMaxOutputTokens: config.defaultMaxOutputTokens,
         capabilities: {
@@ -221,19 +236,19 @@ export class ModelCatalog {
         },
         contextOverride,
       });
-      this.contextByModelId.set(model.id, totalContext);
+      this.contextByModelId.set(registeredId, totalContext);
 
       if (contextOverride !== undefined) {
         log(
-          `  Model ${model.id}: context ${totalContext} tokens from 'modelContextWindows' setting (exposed as input=${info.maxInputTokens}, output=${info.maxOutputTokens})`
+          `  Model ${registeredId}: context ${totalContext} tokens from 'modelContextWindows' setting (exposed as input=${info.maxInputTokens}, output=${info.maxOutputTokens})`
         );
       } else if (hasServerReportedContext) {
         log(
-          `  Model ${model.id}: server-reported context ${totalContext} tokens (exposed as input=${info.maxInputTokens}, output=${info.maxOutputTokens})`
+          `  Model ${registeredId}: server-reported context ${totalContext} tokens (exposed as input=${info.maxInputTokens}, output=${info.maxOutputTokens})`
         );
       } else {
         log(
-          `  Model ${model.id}: no server-reported context; using defaultMaxTokens=${totalContext}. If this is wrong, set 'github.copilot.llm-gateway.modelContextWindows'.`
+          `  Model ${registeredId}: no server-reported context; using defaultMaxTokens=${totalContext}. If this is wrong, set 'github.copilot.llm-gateway.modelContextWindows'.`
         );
       }
 

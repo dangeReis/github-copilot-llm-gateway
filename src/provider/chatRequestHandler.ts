@@ -187,8 +187,9 @@ export class ChatRequestHandler {
       const hasTools = filteredTools !== undefined && filteredTools.length > 0;
       const temperature = hasTools ? config.agentTemperature : DEFAULT_TEMPERATURE;
 
+      const realModelId = catalog.getRealModelId(model.id);
       const requestOptions = buildChatRequest({
-        model: model.id,
+        model: realModelId,
         messages: truncatedMessages,
         maxTokens: safeMaxOutputTokens,
         temperature,
@@ -197,7 +198,7 @@ export class ChatRequestHandler {
         parallelToolCalls: hasTools ? config.parallelToolCalling : undefined,
         extraOptions: {
           ...config.extraModelOptions,
-          ...resolvePerModelOptions(model.id, config.perModelOptions),
+          ...resolvePerModelOptions(realModelId, config.perModelOptions),
           ...options.modelOptions,
         },
       });

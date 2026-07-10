@@ -233,6 +233,18 @@ describe('ModelCatalog.getOrFetchModels', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  test('maps models containing diffusion to diff', async () => {
+    const h = makeCatalog({
+      fetchModels: () => Promise.resolve(modelsResponse({ id: 'google/diffusiongemma-26b-a4b-it' })),
+    });
+
+    const { models, error } = await h.catalog.getOrFetchModels(fakeToken());
+    assert.equal(error, undefined);
+    assert.deepEqual(models.map((m) => m.id), ['google/diffgemma-26b-a4b-it']);
+    assert.equal(h.catalog.getRealModelId('google/diffgemma-26b-a4b-it'), 'google/diffusiongemma-26b-a4b-it');
+    assert.equal(h.catalog.getRealModelId('other-model'), 'other-model');
+  });
 });
 
 describe('ModelCatalog.resolveModelMaxContext', () => {
