@@ -194,6 +194,7 @@
           "markdownDescription": "Per-model context window override (total tokens), keyed by model id. Wins over what the server reports. Use when the server reports no context size — or the wrong one (e.g. llama-server router mode advertises nothing until a model is loaded). Keys match the model id exactly, or use a `*` wildcard (case-insensitive); exact-id entries win. Example: `{ \"qwen2.5-coder-32b\": 32768, \"llama*\": 123904 }`. Edit in settings.json.",
           "order": 21
         },
+
         "github.copilot.llm-gateway.enableInlineCompletion": {
           "type": "boolean",
           "default": false,
