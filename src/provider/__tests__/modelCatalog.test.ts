@@ -168,6 +168,30 @@ describe('ModelCatalog.getOrFetchModels', () => {
     assert.equal(h.fetchCalls, 2);
     assert.equal(h.catalog.getCachedModels().length, 1);
   });
+
+  test('merges customModels into fetched models list', async () => {
+    const h = makeCatalog({
+      fetchModels: () => Promise.resolve(modelsResponse({ id: 'a' })),
+      config: fakeConfig({
+        customModels: ['b', { id: 'c', name: 'Model C' }],
+      }),
+    });
+    const { models, error } = await h.catalog.getOrFetchModels(fakeToken());
+    assert.equal(error, undefined);
+    assert.deepEqual(models.map((m) => m.id), ['a', 'b', 'c']);
+  });
+
+  test('falls back to customModels when server fetch fails', async () => {
+    const h = makeCatalog({
+      fetchModels: () => Promise.reject(new Error('connection refused')),
+      config: fakeConfig({
+        customModels: ['custom-model-id'],
+      }),
+    });
+    const { models, error } = await h.catalog.getOrFetchModels(fakeToken());
+    assert.equal(error, undefined);
+    assert.deepEqual(models.map((m) => m.id), ['custom-model-id']);
+  });
 });
 
 describe('ModelCatalog.resolveModelMaxContext', () => {

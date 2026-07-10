@@ -64,6 +64,7 @@ export class ConfigService {
       extraModelOptions: config.get<Record<string, unknown>>('extraModelOptions', {}) ?? {},
       perModelOptions: config.get<Record<string, unknown>>('perModelOptions', {}) ?? {},
       modelContextWindows: config.get<Record<string, number>>('modelContextWindows', {}) ?? {},
+      customModels: config.get<unknown[]>('customModels', []) ?? [],
       enableInlineCompletion: config.get<boolean>('enableInlineCompletion', false),
       inlineCompletionModel: config.get<string>('inlineCompletionModel', ''),
       inlineCompletionMaxTokens: config.get<number>('inlineCompletionMaxTokens', 256),

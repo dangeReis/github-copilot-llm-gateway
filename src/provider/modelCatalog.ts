@@ -1,5 +1,6 @@
 import type { CancellationToken, LanguageModelChatInformation } from 'vscode';
 import { GatewayClient } from '../api/client';
+import { OpenAIModel } from '../api/types';
 import { GatewayConfig } from '../config/gatewayConfig';
 import { TOKEN_CONSTANTS } from '../chat/tokenBudget';
 import { parseContextOverflowError, resolveContextWindowOverride } from '../chat/contextWindow';
@@ -131,24 +132,61 @@ export class ModelCatalog {
     token: CancellationToken
   ): Promise<LanguageModelChatInformation[]> {
     const { log } = this.deps;
+    const config = this.deps.getConfig();
     log('Fetching models from inference server...');
-    let response;
+    let rawModels: OpenAIModel[] = [];
     try {
-      response = await this.deps.client.fetchModels(token);
+      const response = await this.deps.client.fetchModels(token);
+      rawModels = response.data;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       log(`ERROR: Failed to fetch models: ${errorMessage}`);
-      throw error;
+      if (config.customModels && config.customModels.length > 0) {
+        log('Using configured custom models as fallback.');
+      } else {
+        throw error;
+      }
     }
 
     if (token.isCancellationRequested) {
       return [];
     }
 
-    const uniqueModels = dedupeModels(response.data);
-    if (uniqueModels.length !== response.data.length) {
+    const customModels: OpenAIModel[] = [];
+    if (Array.isArray(config.customModels)) {
+      for (const item of config.customModels) {
+        if (typeof item === 'string') {
+          customModels.push({
+            id: item,
+            object: 'model',
+            created: Math.floor(Date.now() / 1000),
+            owned_by: 'custom',
+          });
+        } else if (item && typeof item === 'object') {
+          const obj = item as Record<string, unknown>;
+          if (typeof obj.id === 'string') {
+            customModels.push({
+              id: obj.id,
+              object: 'model',
+              created: Math.floor(Date.now() / 1000),
+              owned_by: typeof obj.owned_by === 'string' ? obj.owned_by : 'custom',
+            });
+          }
+        }
+      }
+    }
+
+    const combinedModels = [...rawModels];
+    for (const custom of customModels) {
+      if (!combinedModels.some((m) => m.id === custom.id)) {
+        combinedModels.push(custom);
+      }
+    }
+
+    const uniqueModels = dedupeModels(combinedModels);
+    if (uniqueModels.length !== combinedModels.length) {
       log(
-        `Server returned ${response.data.length} models, ${uniqueModels.length} unique after dedupe`
+        `Merged list has ${combinedModels.length} models, ${uniqueModels.length} unique after dedupe`
       );
     }
 
@@ -157,7 +195,6 @@ export class ModelCatalog {
     // chat requests.
     this.contextByModelId.clear();
 
-    const config = this.deps.getConfig();
     const models = uniqueModels.map((model) => {
       const contextOverride = resolveContextWindowOverride(
         model.id,
