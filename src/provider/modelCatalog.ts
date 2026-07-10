@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { CancellationToken, LanguageModelChatInformation } from 'vscode';
 import { GatewayClient } from '../api/client';
 import { OpenAIModel } from '../api/types';
@@ -13,6 +15,7 @@ interface ModelCatalogDeps {
   log: (message: string) => void;
   /** Fired when connection state / cached data changes (status dialog refresh). */
   onStatusChanged: () => void;
+  getGlobalStoragePath?: () => string | undefined;
 }
 
 /**
@@ -134,23 +137,6 @@ export class ModelCatalog {
     const { log } = this.deps;
     const config = this.deps.getConfig();
     log('Fetching models from inference server...');
-    let rawModels: OpenAIModel[] = [];
-    try {
-      const response = await this.deps.client.fetchModels(token);
-      rawModels = response.data;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      log(`ERROR: Failed to fetch models: ${errorMessage}`);
-      if (config.customModels && config.customModels.length > 0) {
-        log('Using configured custom models as fallback.');
-      } else {
-        throw error;
-      }
-    }
-
-    if (token.isCancellationRequested) {
-      return [];
-    }
 
     const customModels: OpenAIModel[] = [];
     if (Array.isArray(config.customModels)) {
@@ -174,6 +160,31 @@ export class ModelCatalog {
           }
         }
       }
+    }
+
+    const autoModels = this.loadChatLanguageModelsJson();
+    for (const model of autoModels) {
+      if (!customModels.some((m) => m.id === model.id)) {
+        customModels.push(model);
+      }
+    }
+
+    let rawModels: OpenAIModel[] = [];
+    try {
+      const response = await this.deps.client.fetchModels(token);
+      rawModels = response.data;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log(`ERROR: Failed to fetch models: ${errorMessage}`);
+      if (customModels.length > 0) {
+        log('Using configured/auto custom models as fallback.');
+      } else {
+        throw error;
+      }
+    }
+
+    if (token.isCancellationRequested) {
+      return [];
     }
 
     const combinedModels = [...rawModels];
@@ -289,5 +300,61 @@ export class ModelCatalog {
         `Add it to 'github.copilot.llm-gateway.modelContextWindows' to persist across sessions.`
     );
     return true;
+  }
+
+  private loadChatLanguageModelsJson(): OpenAIModel[] {
+    const { log, getGlobalStoragePath } = this.deps;
+    if (!getGlobalStoragePath) {
+      return [];
+    }
+    const globalStoragePath = getGlobalStoragePath();
+    if (!globalStoragePath) {
+      return [];
+    }
+
+    try {
+      const userDir = path.resolve(globalStoragePath, '..', '..');
+      const filePath = path.join(userDir, 'chatLanguageModels.json');
+
+      if (!fs.existsSync(filePath)) {
+        return [];
+      }
+
+      const fileContent = fs.readFileSync(filePath, 'utf8');
+      const parsed = JSON.parse(fileContent);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      const models: OpenAIModel[] = [];
+      for (const provider of parsed) {
+        if (provider && typeof provider === 'object' && Array.isArray(provider.models)) {
+          for (const model of provider.models) {
+            if (model && typeof model === 'object' && typeof model.id === 'string') {
+              models.push({
+                id: model.id,
+                object: 'model',
+                created: Math.floor(Date.now() / 1000),
+                owned_by: typeof model.owned_by === 'string' ? model.owned_by : 'custom-endpoint',
+                ...(typeof model.maxInputTokens === 'number' ? { context_window: model.maxInputTokens } : {}),
+                ...(typeof model.context_length === 'number' ? { context_length: model.context_length } : {}),
+                ...(typeof model.max_model_len === 'number' ? { max_model_len: model.max_model_len } : {}),
+              });
+            }
+          }
+        }
+      }
+      if (models.length > 0) {
+        log(
+          `Loaded ${models.length} models from chatLanguageModels.json: ${models.map((m) => m.id).join(', ')}`
+        );
+      }
+      return models;
+    } catch (error) {
+      log(
+        `WARNING: Failed to read/parse chatLanguageModels.json: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return [];
+    }
   }
 }
