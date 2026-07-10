@@ -6,7 +6,7 @@ import { OpenAIModel } from '../api/types';
 import { GatewayConfig } from '../config/gatewayConfig';
 import { TOKEN_CONSTANTS } from '../chat/tokenBudget';
 import { parseContextOverflowError, resolveContextWindowOverride } from '../chat/contextWindow';
-import { dedupeModels } from '../models/modelDisplay';
+import { dedupeModels, friendlyModelName } from '../models/modelDisplay';
 import { buildModelInfo } from '../models/modelInfoBuilder';
 
 interface ModelCatalogDeps {
@@ -236,6 +236,15 @@ export class ModelCatalog {
         },
         contextOverride,
       });
+
+      if (originalId !== registeredId) {
+        const friendlyName = friendlyModelName(originalId);
+        Object.assign(info, {
+          name: friendlyName,
+          version: friendlyName,
+        });
+      }
+
       this.contextByModelId.set(registeredId, totalContext);
 
       if (contextOverride !== undefined) {

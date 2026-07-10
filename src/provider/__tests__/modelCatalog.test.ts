@@ -242,6 +242,8 @@ describe('ModelCatalog.getOrFetchModels', () => {
     const { models, error } = await h.catalog.getOrFetchModels(fakeToken());
     assert.equal(error, undefined);
     assert.deepEqual(models.map((m) => m.id), ['google/diffgemma-26b-a4b-it']);
+    assert.equal(models[0].name, 'diffusiongemma-26b-a4b-it');
+    assert.equal(models[0].version, 'diffusiongemma-26b-a4b-it');
     assert.equal(h.catalog.getRealModelId('google/diffgemma-26b-a4b-it'), 'google/diffusiongemma-26b-a4b-it');
     assert.equal(h.catalog.getRealModelId('other-model'), 'other-model');
   });

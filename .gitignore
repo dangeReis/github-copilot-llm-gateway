@@ -149,3 +149,8 @@ vite.config.ts.timestamp-*
 # Claude AI local settings
 .claude
 .tokensave
+
+# SonarQube directories
+.scannerwork/
+.sonar/
+
